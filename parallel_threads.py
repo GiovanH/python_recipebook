@@ -2,13 +2,14 @@ import threading
 import queue
 import traceback
 
+
 class QueueWorker(threading.Thread):
     """A worker that executes a specific function on all the work
     in a given queue."""
 
     def __init__(self, queue, fn, *args, **kwargs):
         """Summary
-        
+
         Args:
             queue: Queue to draw work from.
             fn: Function executed
@@ -29,12 +30,14 @@ class QueueWorker(threading.Thread):
             self.fn(*work)
             self.queue.task_done()
 
+
 def do_work_helper(workfn, inputs, max_threads=8):
     """Use threads and a queue to parallelize work done by a function."""
     # Create a queue. (Everything following has q in the namespace)
     q = queue.Queue()
 
     results = []
+    result_lock = threading.Lock()
 
     def _process(*args):
         try:
@@ -42,7 +45,10 @@ def do_work_helper(workfn, inputs, max_threads=8):
         except Exception as e:
             traceback.print_exc()
             ret = e
-        results.append(ret)
+        # You usually don't need to lock like this thanks to the GIL, for details see
+        # https://docs.python.org/3/faq/library.html#what-kinds-of-global-value-mutation-are-thread-safe
+        with result_lock:
+            results.append(ret)
 
     for args in inputs:
         # Replace with actual function arguments
@@ -53,33 +59,32 @@ def do_work_helper(workfn, inputs, max_threads=8):
         QueueWorker(q, _process).start()
 
     # Block until the queue is empty.
-    q.join()  
+    q.join()
 
     return results
 
+
 def test_do_work():
+    # Do work manually, without a helper.
+    # Entirely redundant, but included as a recipe.
     MAX_THREADS = 8
+
     # Create a queue. (Everything following has q in the namespace)
     q = queue.Queue()
 
     results = []
 
     def processWork(w):
-        # This is the actual processing function
         results.append(w * 10)
 
     for work in range(80):
-        # Replace with actual function arguments
         q.put_nowait([work])
 
-    # Start threads
     for _ in range(MAX_THREADS):
         QueueWorker(q, processWork).start()
 
-    # Block until the queue is empty.
-    q.join()  
+    q.join()
 
-    # Verify
     assert len(results) == 80
     for work in range(80):
         assert (work * 10) in results
@@ -98,4 +103,3 @@ def test_do_work_helper():
     assert len(results) == 80
     for work in range(80):
         assert (work * 10) in results
-
