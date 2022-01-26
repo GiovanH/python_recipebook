@@ -18,21 +18,30 @@ class QueueWorker(threading.Thread):
         """
         self.queue = queue
         self.fn = fn
+        kwargs['daemon'] = True  # Don't block the program on exceptions
         super().__init__(*args, **kwargs)
 
     def run(self):
         """Run fn on items popped from q until queue is empty."""
         while True:
             try:
-                work = self.queue.get(timeout=3)  # 3s timeout
+                work = self.queue.get()
             except queue.Empty:
                 return
-            self.fn(*work)
-            self.queue.task_done()
+            try:
+                self.fn(*work)
+            except Exception:
+                traceback.print_exc()
+            finally:
+                self.queue.task_done()
 
 
 def do_work_helper(workfn, inputs, max_threads=8):
-    """Use threads and a queue to parallelize work done by a function."""
+    """Use threads and a queue to parallelize work done by a function.
+
+    >>> do_work_helper(lambda x: x * 5, [(i,) for i in range(10)])
+    [0, 5, 10, 15, 20, 25, 30, 35, 40, 45]
+    """
     # Create a queue. (Everything following has q in the namespace)
     q = queue.Queue()
 
