@@ -1,6 +1,5 @@
 import threading
 import queue
-import traceback
 
 
 class QueueWorker(threading.Thread):
@@ -22,6 +21,7 @@ class QueueWorker(threading.Thread):
         super().__init__(*args, **kwargs)
 
     def run(self):
+        import traceback
         """Run fn on items popped from q until queue is empty."""
         while True:
             try:
@@ -42,6 +42,8 @@ def do_work_helper(workfn, inputs, max_threads=8):
     >>> do_work_helper(lambda x: x * 5, [(i,) for i in range(10)])
     [0, 5, 10, 15, 20, 25, 30, 35, 40, 45]
     """
+    import traceback
+    
     # Create a queue. (Everything following has q in the namespace)
     q = queue.Queue()
 
