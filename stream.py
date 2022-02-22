@@ -11,7 +11,7 @@ import logging
 
 class DefaultFormatter(Formatter):
     """String formatter that can be initialized with a set of global defaults.
-    
+
     >>> fmt = DefaultFormatter(value='spam')
     >>> fmtstr = "{value}"
     >>> fmt.format(fmtstr, value='eggs')
@@ -36,7 +36,7 @@ class DefaultFormatter(Formatter):
 
 class Tee(object):
     """Writes the same output to two streams."""
-    
+
     def __init__(self, stream_a, stream_b):
         self.stream_a = stream_a
         self.stream_b = stream_b
@@ -68,7 +68,7 @@ class Tee(object):
 def std_redirected(outfile, errfile=None, tee=False):
     """Context manager that redirects standard out/err.
     If errfile is not supplied, redirects both stdout and stderr to the same output file.
-    
+
     Args:
         outfile: A writable object to replace sys.stdout
         errfile (optional): A writable opject to replace sys.stderr.
@@ -110,6 +110,9 @@ def timestamp():
     return datetime.datetime.now().strftime("%Y-%m-%d %I:%M%p")
 
 
+active_log_handlers = {}
+
+
 def TriadLogger(__name, stream=True, file=True, debug=True, retries=0):
     """Logger that outputs to stdout, a logfile, and a debug logfile with extra verbosity.
     Use with logger = TriadLogger(__name__)
@@ -121,16 +124,18 @@ def TriadLogger(__name, stream=True, file=True, debug=True, retries=0):
         stream (bool, optional): Whether to use stdout
         file (bool, optional): Whether to use a logfile
         debug (bool, optional): Whether to use a debug logfile
-    
+
     Returns:
         logger
     """
+    global active_log_handlers
+
     def makeLogHandler(base, level, format_string):
         h = base
-        h.setLevel(level)  
+        h.setLevel(level)
         h.setFormatter(logging.Formatter(format_string, "%Y-%m-%d %H:%M:%S"))
         return h
-    
+
     logger = logging.getLogger(__name)
     logger.setLevel(logging.DEBUG)
 
@@ -141,40 +146,47 @@ def TriadLogger(__name, stream=True, file=True, debug=True, retries=0):
     if retries > 0:
         if retries > 20:
             raise Exception("Cannot open logfile! Too many instances open?")
-        progname = f"{progname}{retries}" 
+        progname = f"{progname}{retries}"
 
     filepath_normal = f"{progname}_latest.log"
     filepath_debug = f"{progname}_latest_debug.log"
 
     try:
-        
+
         if file:
-            if os.path.isfile(filepath_normal):
-                shutil.move(filepath_normal, filepath_normal + ".bak")
-            logger.addHandler(makeLogHandler(
-                logging.handlers.RotatingFileHandler(filepath_normal, mode="w"), 
-                logging.INFO, 
-                '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
-            ))
+            if not active_log_handlers.get("file"):
+                if os.path.isfile(filepath_normal):
+                    shutil.move(filepath_normal, filepath_normal + ".bak")
+                active_log_handlers["file"] = makeLogHandler(
+                    logging.handlers.RotatingFileHandler(filepath_normal, mode="w"),
+                    logging.INFO,
+                    '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
+                )
+            logger.addHandler(active_log_handlers["file"])
 
         if debug:
-            if os.path.isfile(filepath_debug):
-                shutil.move(filepath_debug, filepath_debug + ".bak")
-            logger.addHandler(makeLogHandler(
-                logging.handlers.RotatingFileHandler(filepath_debug, mode="w", encoding="utf-8"), 
-                logging.DEBUG, 
-                '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
-            ))
+            if not active_log_handlers.get("debug"):
+                if os.path.isfile(filepath_debug):
+                    shutil.move(filepath_debug, filepath_debug + ".bak")
+                active_log_handlers["debug"] = makeLogHandler(
+                    logging.handlers.RotatingFileHandler(filepath_debug, mode="w", encoding="utf-8"),
+                    logging.DEBUG,
+                    '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
+                )
+            logger.addHandler(active_log_handlers["debug"])
 
         if stream:
-            logger.addHandler(makeLogHandler(
-                logging.StreamHandler(), 
-                logging.INFO, 
-                '[%(name)s] %(levelname)s: %(message)s'
-            ))
+            if not active_log_handlers.get("stream"):
+                active_log_handlers["stream"] = makeLogHandler(
+                    logging.StreamHandler(),
+                    logging.INFO,
+                    '[%(name)s] %(levelname)s: %(message)s'
+                )
+            logger.addHandler(active_log_handlers["stream"])
 
         return logger
 
-    except PermissionError:
+    except PermissionError as e:
         print(f"'{filepath_normal}' is busy(?), incrementing")
+        print(e)
         return TriadLogger(__name, stream=stream, file=file, debug=debug, retries=(retries + 1))
