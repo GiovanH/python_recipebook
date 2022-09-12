@@ -28,6 +28,7 @@ class QueueWorker(threading.Thread):
                 work = self.queue.get()
             except queue.Empty:
                 return
+
             try:
                 self.fn(*work)
             except Exception:
@@ -35,6 +36,33 @@ class QueueWorker(threading.Thread):
             finally:
                 self.queue.task_done()
 
+
+class ReschedulableQueueWorker(QueueWorker):
+    """A QueueWorker that can be rescheduled from within the queue.
+
+    Throw ReschedulableQueueWorker.NeedRescheduleError in the work function
+    to abort and move the work to the end of the queue."""
+    class NeedRescheduleError(Exception):
+        pass
+
+    def run(self):
+        import traceback
+        """Run fn on items popped from q until queue is empty."""
+        while True:
+            try:
+                work = self.queue.get()
+            except queue.Empty:
+                return
+
+            try:
+                self.fn(*work)
+            except self.NeedRescheduleError:
+                traceback.print_exc()
+                self.queue.put_nowait(work)
+            except Exception:
+                traceback.print_exc()
+            finally:
+                self.queue.task_done()
 
 def do_work_helper(workfn, inputs, max_threads=8):
     """Use threads and a queue to parallelize work done by a function.
@@ -70,7 +98,10 @@ def do_work_helper(workfn, inputs, max_threads=8):
         QueueWorker(q, _process).start()
 
     # Block until the queue is empty.
-    q.join()
+    try:
+        q.join()
+    except KeyboardInterrupt:
+        return
 
     return results
 
@@ -114,3 +145,30 @@ def test_do_work_helper():
     assert len(results) == 80
     for work in range(80):
         assert (work * 10) in results
+
+def test_reschedule():
+    MAX_THREADS = 3
+    MAX_RANGE = 12
+
+    # Create a queue. (Everything following has q in the namespace)
+    q = queue.Queue()
+
+    results = []
+
+    def doConditionalWork(w):
+        # Can only succeed if it's sequential, otherwise errors.
+        if w == 0 or (results and results[-1] == w - 1):
+            results.append(w)
+        else:
+            raise ReschedulableQueueWorker.NeedRescheduleError(w)
+
+    for work in reversed(range(MAX_RANGE)):
+        # Queue in reverse error so work is not executed in sequential order
+        q.put_nowait([work])
+
+    for _ in range(MAX_THREADS):
+        ReschedulableQueueWorker(q, doConditionalWork).start()
+
+    q.join()
+
+    assert results == list(range(MAX_RANGE))
